@@ -1,0 +1,174 @@
+DBStore - A collectd output plugin to store values in an RDBMS.
+
+Most of the SQL here is PostgreSQL specific. It has not been tested
+with any other database. Please don't ask me how to make it work with
+your database as I don't use your database (unless it is postgres :-)
+
+This has been tested with Posgtres 8.3 and 8.4. I don't pretend to be
+a DBA. I'm sure there are things that could be done better.
+
+Dependencies:
+1. collectd with perl
+2. Postgres (8.4 if you want to interesting things with COUNTERS, see below)
+3. Perl DBI
+4. Perl DBD driver for postgres
+
+Quick Start Guide
+
+1. Have postgres installed and running
+2. createdb <database>
+3. psql -U <username> -f <path to here>/sql/metrics.sql
+4. psql -U <username> -f <path to here>/sql/create_tables.sql
+5. Add the following to your collectd.conf
+ <Plugin perl>
+     IncludeDir "<path to this directory>"
+     BaseName "Collectd::Plugin"
+     LoadPlugin "DBStore"
+     <Plugin DBStore>
+         DBIDriver "Pg"
+         DatabaseHost "<dbhost>"
+         DatabasePort "5432"
+         DatabaseName "<database>"
+         DatabaseUser "<username>"
+         DatabasePassword "<password>"
+      </DBStore>
+ </Plugin>
+6. configure postgres to turn on constrain exclusion.
+
+Rationale and Approach
+
+We wanted to collect system stats at full resolution, possibly longer
+than the configured RRAs, to go back in time to analyize performance.
+
+After looking at the collectd Wiki about a table structure to store
+the data, it occured to me that this could be handled as a
+"dimensional model" or "star schema". Basically build a data
+warehouse.
+
+Putting the redundant information (hostname, plugin and plugin type)
+into their own tables creates a very skinny "fact" table to hold
+the measurements. The next problem was data volume.
+
+Postgres supports data partitioning which will allow you to store
+metrics data into "child" tables that have been partitioned by some
+range of dates/times. Insertion and query time can be inproved for
+very large data sets by only deailing with a subset of the data.
+
+Insertions into the "parent" table are redirected to the appropriate
+child table. The time-span of a child table can be any duration.
+
+Indices are only kept on child tables and old data can quickly be
+removed with a DROP TABLE.
+
+While postgres does support data partitioning, the maintenance of the
+required tables and triggers has to be done manually. That's what most
+of the included SQL is doing.
+
+Configuration
+
+Depending on volume of data coming from collectd you may need to adjust
+the time duration of your child tables.
+
+There are two aspects of data partitioning that need to be created (and maintained):
+      1. Child tables and indices
+      2. The insert trigger function
+
+The create_tables.sql file is the entry point for the functions that
+will create the tables and trigger functions. There are two functions,
+they both take the same arguments:
+     1. create_partition_tables()
+     2. create_partition_trigger()
+
+The arguments (and postgres types) to these functions are:
+    1. The parent table name (text)
+    2. The start timestamp (timestamp)
+    3. The length of time in the future to create tables (interval)
+    4. The "step" for each table (e.g. month, day) (text)
+    5. The format string for the table suffix. The table name will be
+       <parent>_<suffix> (e.g. metrics_2009_02) (text)
+
+create_partition_tables() will create the child tables with the
+appropriate range checks.
+
+create_partition_trigger() will create the trigger function that will
+redirect the insert into the appropriate child table. This function
+still needs to be associated with an insert trigger.
+
+The insert trigger function is one giant if/then/else statement. So
+you don't want the interval too far in the past, or generate too far
+in the future and not update. At some point it will have some impact
+on performance. I haven't tested this impact.
+
+Maintenance
+
+Depending on how far into the future you generate tables and the
+trigger function, you will need to create new child tables and
+regenerate the trigger function. I would suggest putting this into cron
+just before you period is about to expire. I'll let you work out the
+math as to when to do this.
+
+Should you forget, all rows will be inserted into the parent
+table. You won't loose data, but it will hurt performance.
+
+Querying with partitions
+
+To enable the query planner to use the table partitions you need to do
+two things:
+    1. Turn on constrain exclusion:
+          SET constraint_exclusion = on;
+       or set it in postgresql.conf
+    2. Include in the where clause of your queries static timestamps.
+       e.g. select * from metrics where timestamp between
+            '2009-01-01'::timestamp and '2009-02-01'::timestamp
+       functions that return timestamps don't count as 'static'. If in
+       doubt use EXPLAIN.
+
+Inserting Data
+
+Because of the dimensional model, "fact" inserts need to lookup,
+possibly create and attach the dimensions. This is accomplished
+through the function insert_metric() whose signature looks like:
+
+    insert_metric(in_timestamp timestamp,
+                  in_measure double precision,
+                  in_hostname text,
+                  in_ds_type datasource_type,
+                  in_plugin text,
+                  in_plugin_instance text,
+                  in_type text,
+                  in_type_name text,
+                  in_type_instance text) returns void
+
+Where in_timestamp must be something that postgres can convert to a
+timestamp.
+
+datasource_type is either 'GUAGE' or 'COUNTER'
+      
+Working with COUNTERS
+
+Many of the values collected by collectd are of type COUNTER. Ethernet
+interfaces, for example, simply keep a counter of the number of
+bytes/packets/octects etc sent. To calculate bytes/second you need to
+know the difference in time, and the difference in the counter between
+two samples.
+
+Postgres introduced in 8.4 "window" functions which allow you to do
+calculations among the rows returned from a query. One of those
+functions is lag() which will subtract the value in one row from
+another. This is a handy way of working with COUNTERS.
+
+There is an example VIEW definition at the bottom on metrics.sql that
+illustrates this use of this feature. Using views and partitioned
+tables do not really work well as when the view is constructed it
+will query the entire table without the needed WHERE clauses
+illustrated above. This will be slow.
+
+Patches and suggestions welcome.
+
+Bob Cotton
+bob.cotton@gmail.com
+
+Further Reading
+http://www.postgresql.org/docs/8.3/interactive/ddl-partitioning.html
+http://www.slideshare.net/xzilla/postgresql-partitioning-pgcon-2007-presentation
+
