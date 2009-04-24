@@ -20,19 +20,20 @@ Quick Start Guide
 3. psql -U <username> -f <path to here>/sql/metrics.sql
 4. psql -U <username> -f <path to here>/sql/create_tables.sql
 5. Add the following to your collectd.conf
- <Plugin perl>
-     IncludeDir "<path to this directory>"
-     BaseName "Collectd::Plugin"
-     LoadPlugin "DBStore"
-     <Plugin DBStore>
-         DBIDriver "Pg"
-         DatabaseHost "<dbhost>"
-         DatabasePort "5432"
-         DatabaseName "<database>"
-         DatabaseUser "<username>"
-         DatabasePassword "<password>"
-      </DBStore>
- </Plugin>
+LoadPlugin perl
+<Plugin perl>
+        IncludeDir "<path to this directory>/perl"
+        BaseName "Collectd::Plugin"
+        LoadPlugin DBStore
+        <Plugin DBStore>
+           DBIDriver "Pg"
+           DatabaseHost "<hostname>"
+           DatabasePort "5432"
+           DatabaseName "<database name>"
+           DatabaseUser "<username>"
+           DatabasePassword "<password>"
+        </Plugin>
+</Plugin>
 6. configure postgres to turn on constrain exclusion.
 
 Rationale and Approach
