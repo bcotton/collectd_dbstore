@@ -127,17 +127,14 @@ $$ LANGUAGE plpgsql;
 --  SELECT timestamp,
 --   ((m.measure - lag(m.measure) 
 --           over(partition by m.hostname_id, 
---                             p.plugin,
---                             p.plugin_instance,
---                             t.type,
---                             t.type_instance
---                 order by timestamp, m.hostname_id, p.plugin, p.plugin_instance, t.type, t.type_instance))) AS metric,
+--                             p.plugin_id,
+--                             t.type_id,
+--                 order by timestamp, m.hostname_id, p.plugin_id, t.type_id))) AS metric,
 --  m.hostname_id, 
 --  m.plugin_id, 
 --  m.type_id
 -- FROM metrics m, plugin_dimension p, type_dimension t
 -- where m.type_id = t.id
--- and m.plugin_id = p.id
 -- and t.ds_type = 'COUNTER'
 -- UNION
 -- select timestamp, m.measure as metric,
